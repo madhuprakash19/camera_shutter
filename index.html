@@ -2,51 +2,75 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Live P2P Cam</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Ultimate Remote Cam</title>
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <script src="https://unpkg.com/html5-qrcode"></script>
     <style>
-        body { font-family: sans-serif; background: #111; color: white; text-align: center; margin: 0; padding: 10px; }
-        .box { max-width: 450px; margin: auto; background: #222; padding: 15px; border-radius: 15px; }
-        video { width: 100%; border-radius: 10px; background: #000; margin-top: 10px; }
-        #remote-preview { width: 160px; height: 120px; position: fixed; bottom: 20px; right: 20px; border: 2px solid #0f8; }
-        #qrcode { background: white; padding: 10px; display: inline-block; margin: 10px; border-radius: 5px; }
-        .btn { background: #00ff88; color: black; border: none; padding: 12px; width: 100%; border-radius: 8px; font-weight: bold; margin: 5px 0; }
-        .shutter { width: 70px; height: 70px; background: white; border-radius: 50%; margin: 20px auto; border: 5px solid #00ff88; cursor: pointer; }
-        .hidden { display: none; }
+        :root { --accent: #00ff88; --bg: #000; }
+        body { font-family: sans-serif; background: var(--bg); color: white; margin: 0; overflow: hidden; }
+        #app { display: flex; flex-direction: column; height: 100vh; align-items: center; justify-content: center; }
+        
+        /* Video Container */
+        .video-wrap { position: relative; width: 100%; flex-grow: 1; display: flex; align-items: center; justify-content: center; background: #111; }
+        video { max-width: 100%; max-height: 100%; }
+        .mirrored { transform: scaleX(-1); }
+
+        /* Overlays */
+        #qrcode { background: white; padding: 10px; border-radius: 8px; margin-bottom: 20px; }
+        .controls { position: absolute; bottom: 30px; left: 0; right: 0; display: flex; justify-content: center; gap: 20px; align-items: center; pointer-events: none; }
+        .controls * { pointer-events: auto; }
+
+        /* Buttons */
+        .btn { background: rgba(255,255,255,0.2); border: 1px solid white; color: white; padding: 10px 15px; border-radius: 8px; cursor: pointer; }
+        .shutter { width: 70px; height: 70px; background: white; border-radius: 50%; border: 5px solid var(--accent); cursor: pointer; }
+        .fs-btn { position: absolute; top: 10px; right: 10px; z-index: 10; font-size: 20px; }
+
+        .hidden { display: none !important; }
+        #status { font-size: 12px; color: var(--accent); position: absolute; top: 10px; left: 10px; }
     </style>
 </head>
 <body>
 
-<div class="box">
-    <h3>Live Remote Cam</h3>
-    <div id="status" style="color: #888; font-size: 12px;">Choose a role</div>
-
-    <div id="setup">
-        <button class="btn" onclick="startApp('camera')">📸 ACT AS CAMERA</button>
-        <button class="btn" onclick="startApp('remote')">📱 ACT AS REMOTE</button>
+<div id="app">
+    <div id="status">Ready</div>
+    
+    <div id="setup-menu" style="padding: 20px; text-align: center;">
+        <h2>Remote Cam P2P</h2>
+        <button class="btn" onclick="init('camera')" style="background: var(--accent); color: black; margin-bottom: 10px; width: 200px;">BE THE CAMERA</button><br>
+        <button class="btn" onclick="init('remote')" style="width: 200px;">BE THE REMOTE</button>
     </div>
 
-    <div id="camera-ui" class="hidden">
-        <div id="qrcode"></div>
-        <video id="local-video" autoplay playsinline muted style="transform: scaleX(-1);"></video>
+    <div id="viewer" class="video-wrap hidden">
+        <button class="btn fs-btn" onclick="toggleFS()">⛶</button>
+        <video id="v" autoplay playsinline muted></video>
+        
+        <div id="qr-container" class="hidden" style="position: absolute; z-index: 5; text-align: center;">
+            <div id="qrcode"></div>
+            <p>Scan to Link</p>
+        </div>
+
+        <div id="remote-tools" class="controls hidden">
+            <button class="btn" onclick="toggleMirror()">Mirror</button>
+            <div class="shutter" onclick="triggerSnap()"></div>
+            <div style="width: 60px;"></div> </div>
     </div>
 
-    <div id="remote-ui" class="hidden">
+    <div id="reader-wrap" class="hidden" style="width: 100%; max-width: 400px;">
         <div id="reader"></div>
-        <video id="remote-video" autoplay playsinline style="width:100%; height:200px;"></video>
-        <div class="shutter" onclick="capture()"></div>
-        <p>Live Preview Active</p>
+        <p style="text-align: center;">Scan Camera Phone QR</p>
     </div>
 </div>
 
 <script>
-    let peer, conn, currentCall;
+    let peer, conn, localStream, chunkBuffer = {};
+    const CHUNK_SIZE = 16384; // 16KB chunks for stability
 
-    function startApp(role) {
-        document.getElementById('setup').classList.add('hidden');
+    function init(role) {
+        document.getElementById('setup-menu').classList.add('hidden');
+        document.getElementById('viewer').classList.remove('hidden');
+        
         peer = new Peer({ config: {'iceServers': [{ 'urls': 'stun:stun.l.google.com:19302' }]} });
 
         peer.on('open', (id) => {
@@ -55,74 +79,103 @@
         });
     }
 
-    // --- CAMERA PHONE ---
     async function setupCamera(id) {
-        document.getElementById('camera-ui').classList.remove('hidden');
+        document.getElementById('qr-container').classList.remove('hidden');
         const link = window.location.origin + window.location.pathname + "?join=" + id;
-        new QRCode(document.getElementById("qrcode"), { text: link, width: 150, height: 150 });
+        new QRCode(document.getElementById("qrcode"), { text: link, width: 180, height: 180 });
 
-        // Capture High-Res for photo, but we will stream it Low-Res
-        const stream = await navigator.mediaDevices.getUserMedia({ 
-            video: { facingMode: "environment", width: 640 } 
+        localStream = await navigator.mediaDevices.getUserMedia({ 
+            video: { facingMode: "environment", width: { ideal: 1920 } } 
         });
-        document.getElementById('local-video').srcObject = stream;
+        document.getElementById('v').srcObject = localStream;
 
-        // Answer incoming calls with our stream
-        peer.on('call', (call) => {
-            call.answer(stream);
-            handleStream(call);
-        });
-
-        peer.on('connection', (c) => { 
-            conn = c; 
-            conn.on('data', d => d === 'SNAP' && takePhoto());
-            // After connection is established, we can technically go offline
-            setTimeout(() => peer.disconnect(), 5000); 
+        peer.on('call', call => call.answer(localStream));
+        peer.on('connection', c => {
+            conn = c;
+            document.getElementById('qr-container').classList.add('hidden');
+            document.getElementById('status').innerText = "LINKED (CAMERA)";
+            setupDataChannel();
+            setTimeout(() => peer.disconnect(), 4000); // Go Offline mode
         });
     }
 
-    // --- REMOTE PHONE ---
     function setupRemote() {
-        document.getElementById('remote-ui').classList.remove('hidden');
+        document.getElementById('reader-wrap').classList.remove('hidden');
         const scanner = new Html5Qrcode("reader");
-        scanner.start({ facingMode: "environment" }, { fps: 10, qrbox: 200 }, (url) => {
+        scanner.start({ facingMode: "environment" }, { fps: 10, qrbox: 250 }, (url) => {
             scanner.stop();
-            document.getElementById('reader').classList.add('hidden');
+            document.getElementById('reader-wrap').classList.add('hidden');
             const targetId = new URL(url).searchParams.get('join');
             
-            // Start Data connection
-            conn = peer.connect(targetId);
-            
-            // Start Video Call (Requesting low-res to save bandwidth)
-            navigator.mediaDevices.getUserMedia({ video: { width: 160, height: 120 }, audio: false })
-            .then(myStream => {
-                const call = peer.call(targetId, myStream);
-                handleStream(call);
+            conn = peer.connect(targetId, { reliable: true });
+            navigator.mediaDevices.getUserMedia({ video: { width: 160 } }).then(s => {
+                const call = peer.call(targetId, s);
+                call.on('stream', rs => document.getElementById('v').srcObject = rs);
             });
+            setupDataChannel();
         });
     }
 
-    function handleStream(call) {
-        call.on('stream', (remoteStream) => {
-            document.getElementById('remote-video').srcObject = remoteStream;
-            document.getElementById('status').innerText = "LIVE FEED CONNECTED";
+    function setupDataChannel() {
+        conn.on('open', () => {
+            document.getElementById('remote-tools').classList.remove('hidden');
+            document.getElementById('status').innerText = "LINKED (LIVE)";
+        });
+
+        conn.on('data', data => {
+            if (data === 'SNAP_CMD') takeHighResSnap();
+            if (data.type === 'CHUNK') handleIncomingChunk(data);
         });
     }
 
-    function capture() { conn.send('SNAP'); }
-
-    function takePhoto() {
-        const v = document.getElementById('local-video');
+    // --- PHOTO CHUNKING LOGIC ---
+    function takeHighResSnap() {
+        const v = document.getElementById('v');
         const canvas = document.createElement('canvas');
         canvas.width = v.videoWidth; canvas.height = v.videoHeight;
-        canvas.getContext('2d').drawImage(v, 0, 0);
-        conn.send({ img: canvas.toDataURL('image/jpeg', 0.9) });
+        const ctx = canvas.getContext('2d');
+        if(v.classList.contains('mirrored')) { ctx.translate(canvas.width,0); ctx.scale(-1,1); }
+        ctx.drawImage(v, 0, 0);
+        
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
+        sendInChunks(dataUrl);
     }
 
-    peer && peer.on('data', data => { if(data.img) download(data.img); });
+    function sendInChunks(data) {
+        const total = Math.ceil(data.length / CHUNK_SIZE);
+        const fileId = Date.now();
+        for (let i = 0; i < total; i++) {
+            const chunk = data.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
+            conn.send({ type: 'CHUNK', id: fileId, index: i, total: total, data: chunk });
+        }
+    }
+
+    function handleIncomingChunk(payload) {
+        if (!chunkBuffer[payload.id]) chunkBuffer[payload.id] = [];
+        chunkBuffer[payload.id][payload.index] = payload.data;
+
+        const current = Object.keys(chunkBuffer[payload.id]).length;
+        document.getElementById('status').innerText = `Receiving: ${Math.round((current/payload.total)*100)}%`;
+
+        if (current === payload.total) {
+            const fullData = chunkBuffer[payload.id].join('');
+            download(fullData);
+            delete chunkBuffer[payload.id];
+            document.getElementById('status').innerText = "Photo Saved!";
+        }
+    }
+
+    // --- UI HELPERS ---
+    function triggerSnap() { conn.send('SNAP_CMD'); }
+    function toggleMirror() { document.getElementById('v').classList.toggle('mirrored'); }
+    function toggleFS() {
+        const elem = document.getElementById('viewer');
+        if (!document.fullscreenElement) elem.requestFullscreen().catch(err => alert(err.message));
+        else document.exitFullscreen();
+    }
     function download(url) {
         const a = document.createElement('a'); a.href = url;
-        a.download = `snap_${Date.now()}.jpg`; a.click();
+        a.download = `photo_${Date.now()}.jpg`; a.click();
     }
 </script>
 </body>
