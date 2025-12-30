@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Max Clarity P2P + Audio</title>
+    <title>Pro Remote Cam</title>
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <script src="https://unpkg.com/html5-qrcode"></script>
@@ -26,19 +26,16 @@
 
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
         .hidden { display: none !important; }
-        #flash { position: fixed; inset: 0; background: white; opacity: 0; pointer-events: none; z-index: 1000; }
+        #flash { position: fixed; inset: 0; background: white; opacity: 0; pointer-events: none; z-index: 1000; transition: opacity 0.1s; }
         #setup { position: fixed; inset: 0; background: #000; z-index: 500; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px; }
-        
-        /* QR Container Styling */
-        #qr-wrap { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); background:white; padding:20px; border-radius:15px; text-align:center; z-index: 200; box-shadow: 0 0 30px rgba(0,0,0,0.5); }
-        .copy-btn { margin-top: 15px; background: #eee; border: 1px solid #ccc; color: #333; padding: 8px 12px; border-radius: 5px; cursor: pointer; font-size: 12px; display: block; width: 100%; }
-        .copy-btn:active { background: #ddd; }
+        #qr-wrap { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); background:white; padding:20px; border-radius:15px; text-align:center; z-index: 200; color: #000; }
+        .copy-btn { margin-top: 15px; background: #eee; border: 1px solid #ccc; color: #333; padding: 8px 12px; border-radius: 5px; cursor: pointer; width: 100%; }
     </style>
 </head>
 <body>
 
 <div id="flash"></div>
-<div id="status">System Offline</div>
+<div id="status">Disconnected</div>
 <div id="timer-display"></div>
 
 <div id="setup">
@@ -52,7 +49,7 @@
 
     <div id="qr-wrap" class="hidden">
         <div id="qrcode"></div>
-        <p style="color:black; font-size:12px; margin-top:10px; font-weight:bold;">Scan to Link</p>
+        <p style="font-size:12px; margin-top:10px; font-weight:bold;">Scan to Link</p>
         <button id="copy-link-btn" class="copy-btn">📋 Copy Link</button>
     </div>
 
@@ -75,10 +72,11 @@
 <div id="reader-wrap" class="hidden" style="position:fixed; inset:0; background:black; z-index:400;"><div id="reader"></div></div>
 
 <script>
-    let peer, conn, localStream, timerVal = 0, chunkBuffer = {}, audioCtx, lastLink = "";
+    let peer, conn, localStream, timerVal = 0, chunkBuffer = {}, audioCtx, myRole = '';
     const CHUNK_SIZE = 16384;
 
     function init(role) {
+        myRole = role;
         audioCtx = new (window.AudioContext || window.webkitAudioContext)();
         document.getElementById('setup').classList.add('hidden');
         document.getElementById('app').classList.remove('hidden');
@@ -87,13 +85,14 @@
     }
 
     async function setupCam(id) {
-        document.getElementById('qr-wrap').classList.remove('hidden');
-        lastLink = window.location.origin + window.location.pathname + "?join=" + id;
-        new QRCode(document.getElementById("qrcode"), { text: lastLink, width: 180, height: 180 });
+        const qrWrap = document.getElementById('qr-wrap');
+        qrWrap.classList.remove('hidden');
+        const link = window.location.origin + window.location.pathname + "?join=" + id;
+        new QRCode(document.getElementById("qrcode"), { text: link, width: 180, height: 180 });
         
         document.getElementById('copy-link-btn').onclick = () => {
-            navigator.clipboard.writeText(lastLink).then(() => {
-                document.getElementById('copy-link-btn').innerText = "✅ Link Copied!";
+            navigator.clipboard.writeText(link).then(() => {
+                document.getElementById('copy-link-btn').innerText = "✅ Copied!";
                 setTimeout(() => document.getElementById('copy-link-btn').innerText = "📋 Copy Link", 2000);
             });
         };
@@ -103,7 +102,7 @@
         peer.on('call', call => call.answer(localStream));
         peer.on('connection', c => {
             conn = c;
-            document.getElementById('qr-wrap').classList.add('hidden');
+            qrWrap.classList.add('hidden');
             document.getElementById('status').innerText = "LINKED: CAMERA";
             bindData();
             setTimeout(() => peer.disconnect(), 5000);
@@ -117,19 +116,16 @@
     }
 
     function setupRem() {
-        const urlParams = new URLSearchParams(window.location.search);
-        const joinId = urlParams.get('join');
-
-        if (joinId) {
-            connectToPeer(joinId);
+        const tid = new URLSearchParams(window.location.search).get('join');
+        if (tid) {
+            connectToPeer(tid);
         } else {
             document.getElementById('reader-wrap').classList.remove('hidden');
             const scanner = new Html5Qrcode("reader");
             scanner.start({ facingMode: "environment" }, { fps: 10, qrbox: 250 }, url => {
                 scanner.stop();
                 document.getElementById('reader-wrap').classList.add('hidden');
-                const tid = new URL(url).searchParams.get('join');
-                connectToPeer(tid);
+                connectToPeer(new URL(url).searchParams.get('join'));
             });
         }
     }
@@ -144,8 +140,8 @@
 
     function bindData() {
         conn.on('open', () => {
-            document.getElementById('remote-ui').classList.remove('hidden');
             document.getElementById('status').innerText = "LINKED: READY";
+            if (myRole === 'remote') document.getElementById('remote-ui').classList.remove('hidden');
         });
         conn.on('data', data => {
             if (data.type === 'TIMER') runCount(data.val);
@@ -165,13 +161,10 @@
         if (!audioCtx) return;
         const osc = audioCtx.createOscillator();
         const gain = audioCtx.createGain();
-        osc.connect(gain);
-        gain.connect(audioCtx.destination);
-        osc.frequency.value = freq;
-        gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+        osc.connect(gain); gain.connect(audioCtx.destination);
+        osc.frequency.value = freq; gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
         gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + dur);
-        osc.start();
-        osc.stop(audioCtx.currentTime + dur);
+        osc.start(); osc.stop(audioCtx.currentTime + dur);
     }
 
     function runCount(sec) {
@@ -182,15 +175,12 @@
         const interval = setInterval(() => {
             if (count > 0) {
                 disp.innerText = count;
-                playBeep(880, 0.1); 
-                count--;
+                playBeep(880, 0.1); count--;
             } else {
                 clearInterval(interval);
                 disp.innerText = "";
-                playBeep(1760, 0.3); 
-                if (document.getElementById('qr-wrap').classList.contains('hidden') && document.getElementById('remote-ui').classList.contains('hidden')) {
-                    doCapture();
-                }
+                playBeep(1760, 0.3);
+                if (myRole === 'camera') doCapture();
             }
         }, 1000);
     }
@@ -210,10 +200,8 @@
 
             setTimeout(async () => {
                 const canvas = document.createElement('canvas');
-                canvas.width = vTemp.videoWidth; 
-                canvas.height = vTemp.videoHeight;
-                const ctx = canvas.getContext('2d');
-                ctx.drawImage(vTemp, 0, 0);
+                canvas.width = vTemp.videoWidth; canvas.height = vTemp.videoHeight;
+                canvas.getContext('2d').drawImage(vTemp, 0, 0);
                 const data = canvas.toDataURL('image/jpeg', 1.0);
                 captureStream.getTracks().forEach(t => t.stop());
                 startPreview();
