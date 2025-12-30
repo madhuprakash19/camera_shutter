@@ -3,70 +3,68 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Pro Remote Cam</title>
+    <title>Max Clarity P2P + Audio</title>
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <script src="https://unpkg.com/html5-qrcode"></script>
     <style>
         :root { --accent: #00ff88; --bg: #000; }
         body { font-family: sans-serif; background: var(--bg); color: white; margin: 0; overflow: hidden; }
-        
-        /* Video & Layout */
         .viewport { height: 100vh; display: flex; flex-direction: column; position: relative; }
         video { width: 100%; height: 100%; object-fit: contain; background: #111; }
         .mirrored { transform: scaleX(-1); }
 
-        /* UI Overlays */
         #status { position: absolute; top: 10px; left: 10px; font-size: 11px; background: rgba(0,0,0,0.6); padding: 5px 10px; border-radius: 20px; z-index: 100; color: var(--accent); }
-        #timer-display { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 80px; font-weight: bold; color: white; text-shadow: 0 0 20px rgba(0,0,0,0.8); z-index: 90; pointer-events: none; }
+        #timer-display { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 120px; font-weight: bold; color: white; text-shadow: 0 0 30px #000; z-index: 90; pointer-events: none; }
         
-        /* Controls */
         .controls { position: absolute; bottom: 30px; width: 100%; display: flex; flex-direction: column; align-items: center; gap: 15px; z-index: 80; }
-        .row { display: flex; gap: 15px; align-items: center; }
-        
         .shutter { width: 75px; height: 75px; background: white; border-radius: 50%; border: 5px solid var(--accent); cursor: pointer; display: flex; align-items: center; justify-content: center; position: relative; }
-        .shutter:active { transform: scale(0.9); }
         .spinner { border: 4px solid rgba(0,0,0,0.1); border-top: 4px solid var(--accent); border-radius: 50%; width: 65px; height: 65px; animation: spin 1s linear infinite; position: absolute; display: none; }
         
-        .btn-small { background: rgba(255,255,255,0.2); border: 1px solid white; color: white; padding: 8px 12px; border-radius: 20px; font-size: 12px; }
+        .btn-small { background: rgba(255,255,255,0.2); border: 1px solid white; color: white; padding: 10px 15px; border-radius: 20px; font-size: 12px; cursor: pointer; }
         .active-timer { background: var(--accent); color: black; border-color: var(--accent); }
 
-        /* General */
         @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
         .hidden { display: none !important; }
-        #flash { position: fixed; inset: 0; background: white; opacity: 0; pointer-events: none; z-index: 1000; transition: opacity 0.1s; }
+        #flash { position: fixed; inset: 0; background: white; opacity: 0; pointer-events: none; z-index: 1000; }
         #setup { position: fixed; inset: 0; background: #000; z-index: 500; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px; }
+        
+        /* QR Container Styling */
+        #qr-wrap { position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); background:white; padding:20px; border-radius:15px; text-align:center; z-index: 200; box-shadow: 0 0 30px rgba(0,0,0,0.5); }
+        .copy-btn { margin-top: 15px; background: #eee; border: 1px solid #ccc; color: #333; padding: 8px 12px; border-radius: 5px; cursor: pointer; font-size: 12px; display: block; width: 100%; }
+        .copy-btn:active { background: #ddd; }
     </style>
 </head>
 <body>
 
 <div id="flash"></div>
-<div id="status">Disconnected</div>
+<div id="status">System Offline</div>
 <div id="timer-display"></div>
 
 <div id="setup">
     <h2 style="color:var(--accent)">Remote Cam Pro</h2>
-    <button class="btn-small" style="width:200px; padding:15px; font-weight:bold; background:var(--accent); color:black;" onclick="start('camera')">CAMERA MODE</button>
-    <button class="btn-small" style="width:200px; padding:15px; font-weight:bold;" onclick="start('remote')">REMOTE MODE</button>
+    <button class="btn-small" style="width:200px; padding:15px;" onclick="init('camera')">CAMERA MODE</button>
+    <button class="btn-small" style="width:200px; padding:15px;" onclick="init('remote')">REMOTE MODE</button>
 </div>
 
 <div id="app" class="viewport hidden">
     <video id="v" autoplay playsinline muted></video>
 
-    <div id="qr-wrap" class="hidden" style="position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); background:white; padding:15px; border-radius:10px; text-align:center;">
+    <div id="qr-wrap" class="hidden">
         <div id="qrcode"></div>
-        <p style="color:black; font-size:12px; margin-top:10px;">Scan to Link Devices</p>
+        <p style="color:black; font-size:12px; margin-top:10px; font-weight:bold;">Scan to Link</p>
+        <button id="copy-link-btn" class="copy-btn">📋 Copy Link</button>
     </div>
 
     <div id="remote-ui" class="controls hidden">
-        <div class="row">
-            <button id="t0" class="btn-small active-timer" onclick="setTimer(0)">0s</button>
-            <button id="t3" class="btn-small" onclick="setTimer(3)">3s</button>
-            <button id="t10" class="btn-small" onclick="setTimer(10)">10s</button>
+        <div class="row" style="display:flex; gap:10px; margin-bottom:10px;">
+            <button id="t0" class="btn-small active-timer" onclick="updateTimer(0)">0s</button>
+            <button id="t3" class="btn-small" onclick="updateTimer(3)">3s</button>
+            <button id="t10" class="btn-small" onclick="updateTimer(10)">10s</button>
         </div>
-        <div class="row">
+        <div class="row" style="display:flex; gap:20px; align-items:center;">
             <button class="btn-small" onclick="document.getElementById('v').classList.toggle('mirrored')">Flip</button>
-            <div class="shutter" onclick="triggerRequest()">
+            <div class="shutter" onclick="reqSnap()">
                 <div id="shutter-loading" class="spinner"></div>
             </div>
             <button class="btn-small" onclick="toggleFS()">Full</button>
@@ -74,147 +72,172 @@
     </div>
 </div>
 
-<div id="reader-wrap" class="hidden" style="position:fixed; inset:0; background:black; z-index:400;">
-    <div id="reader"></div>
-</div>
+<div id="reader-wrap" class="hidden" style="position:fixed; inset:0; background:black; z-index:400;"><div id="reader"></div></div>
 
 <script>
-    let peer, conn, localStream, timerSec = 0, chunkBuffer = {};
+    let peer, conn, localStream, timerVal = 0, chunkBuffer = {}, audioCtx, lastLink = "";
     const CHUNK_SIZE = 16384;
 
-    function start(role) {
+    function init(role) {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
         document.getElementById('setup').classList.add('hidden');
         document.getElementById('app').classList.remove('hidden');
         peer = new Peer({ config: {'iceServers': [{ 'urls': 'stun:stun.l.google.com:19302' }]} });
-
-        peer.on('open', id => {
-            if (role === 'camera') setupCamera(id);
-            else setupRemote();
-        });
+        peer.on('open', id => role === 'camera' ? setupCam(id) : setupRem());
     }
 
-    async function setupCamera(id) {
+    async function setupCam(id) {
         document.getElementById('qr-wrap').classList.remove('hidden');
-        const link = window.location.origin + window.location.pathname + "?join=" + id;
-        new QRCode(document.getElementById("qrcode"), { text: link, width: 180, height: 180 });
+        lastLink = window.location.origin + window.location.pathname + "?join=" + id;
+        new QRCode(document.getElementById("qrcode"), { text: lastLink, width: 180, height: 180 });
+        
+        document.getElementById('copy-link-btn').onclick = () => {
+            navigator.clipboard.writeText(lastLink).then(() => {
+                document.getElementById('copy-link-btn').innerText = "✅ Link Copied!";
+                setTimeout(() => document.getElementById('copy-link-btn').innerText = "📋 Copy Link", 2000);
+            });
+        };
 
-        // Start in LOW-RES for smooth live feed
-        localStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment", width: 320 } });
-        document.getElementById('v').srcObject = localStream;
+        await startPreview();
 
         peer.on('call', call => call.answer(localStream));
         peer.on('connection', c => {
             conn = c;
             document.getElementById('qr-wrap').classList.add('hidden');
             document.getElementById('status').innerText = "LINKED: CAMERA";
-            setupData();
+            bindData();
             setTimeout(() => peer.disconnect(), 5000);
         });
     }
 
-    function setupRemote() {
-        document.getElementById('reader-wrap').classList.remove('hidden');
-        const scanner = new Html5Qrcode("reader");
-        scanner.start({ facingMode: "environment" }, { fps: 10, qrbox: 250 }, url => {
-            scanner.stop();
-            document.getElementById('reader-wrap').classList.add('hidden');
-            const tid = new URL(url).searchParams.get('join');
-            conn = peer.connect(tid, { reliable: true });
-            navigator.mediaDevices.getUserMedia({ video: { width: 160 } }).then(s => {
-                const call = peer.call(tid, s);
-                call.on('stream', rs => document.getElementById('v').srcObject = rs);
-            });
-            setupData();
-        });
+    async function startPreview() {
+        if (localStream) localStream.getTracks().forEach(t => t.stop());
+        localStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment", width: 320 } });
+        document.getElementById('v').srcObject = localStream;
     }
 
-    function setupData() {
+    function setupRem() {
+        const urlParams = new URLSearchParams(window.location.search);
+        const joinId = urlParams.get('join');
+
+        if (joinId) {
+            connectToPeer(joinId);
+        } else {
+            document.getElementById('reader-wrap').classList.remove('hidden');
+            const scanner = new Html5Qrcode("reader");
+            scanner.start({ facingMode: "environment" }, { fps: 10, qrbox: 250 }, url => {
+                scanner.stop();
+                document.getElementById('reader-wrap').classList.add('hidden');
+                const tid = new URL(url).searchParams.get('join');
+                connectToPeer(tid);
+            });
+        }
+    }
+
+    function connectToPeer(tid) {
+        conn = peer.connect(tid, { reliable: true });
+        navigator.mediaDevices.getUserMedia({ video: { width: 160 } }).then(s => {
+            peer.call(tid, s).on('stream', rs => document.getElementById('v').srcObject = rs);
+        });
+        bindData();
+    }
+
+    function bindData() {
         conn.on('open', () => {
             document.getElementById('remote-ui').classList.remove('hidden');
-            document.getElementById('status').innerText = "LINKED: LIVE";
+            document.getElementById('status').innerText = "LINKED: READY";
         });
         conn.on('data', data => {
-            if (data.type === 'START_TIMER') runCountdown(data.val);
+            if (data.type === 'TIMER') runCount(data.val);
             if (data.type === 'CHUNK') handleChunk(data);
         });
     }
 
-    function setTimer(s) {
-        timerSec = s;
+    function updateTimer(s) {
+        timerVal = s;
         ['t0','t3','t10'].forEach(id => document.getElementById(id).classList.remove('active-timer'));
         document.getElementById('t'+s).classList.add('active-timer');
     }
 
-    function triggerRequest() {
-        if (!conn || !conn.open) return;
-        conn.send({ type: 'START_TIMER', val: timerSec });
-        if (timerSec > 0) document.getElementById('shutter-loading').style.display = 'block';
+    function reqSnap() { if (conn && conn.open) conn.send({ type: 'TIMER', val: timerVal }); }
+
+    function playBeep(freq, dur) {
+        if (!audioCtx) return;
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.frequency.value = freq;
+        gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + dur);
+        osc.start();
+        osc.stop(audioCtx.currentTime + dur);
     }
 
-    function runCountdown(sec) {
+    function runCount(sec) {
         let count = sec;
         const disp = document.getElementById('timer-display');
+        document.getElementById('shutter-loading').style.display = 'block';
         
         const interval = setInterval(() => {
             if (count > 0) {
                 disp.innerText = count;
+                playBeep(880, 0.1); 
                 count--;
             } else {
                 clearInterval(interval);
                 disp.innerText = "";
-                captureHighRes();
+                playBeep(1760, 0.3); 
+                if (document.getElementById('qr-wrap').classList.contains('hidden') && document.getElementById('remote-ui').classList.contains('hidden')) {
+                    doCapture();
+                }
             }
         }, 1000);
     }
 
-    async function captureHighRes() {
-        // Flash Effect
-        const flash = document.getElementById('flash');
-        flash.style.opacity = '1';
-        setTimeout(() => flash.style.opacity = '0', 150);
+    async function doCapture() {
+        document.getElementById('flash').style.opacity = '1';
+        setTimeout(() => document.getElementById('flash').style.opacity = '0', 150);
+        localStream.getTracks().forEach(track => track.stop());
 
-        const videoTrack = localStream.getVideoTracks()[0];
-        // Flip to Ultra-Res momentarily
-        await videoTrack.applyConstraints({ video: { width: { ideal: 4096 } } });
+        try {
+            const captureStream = await navigator.mediaDevices.getUserMedia({ 
+                video: { facingMode: "environment", width: { ideal: 4032 }, height: { ideal: 3024 } } 
+            });
+            const vTemp = document.createElement('video');
+            vTemp.srcObject = captureStream;
+            await vTemp.play();
 
-        setTimeout(async () => {
-            const v = document.getElementById('v');
-            const canvas = document.createElement('canvas');
-            canvas.width = v.videoWidth; canvas.height = v.videoHeight;
-            const ctx = canvas.getContext('2d');
-            if (v.classList.contains('mirrored')) { ctx.translate(canvas.width,0); ctx.scale(-1,1); }
-            ctx.drawImage(v, 0, 0);
-            
-            const data = canvas.toDataURL('image/jpeg', 1.0);
-            
-            // Revert to Low-Res for live feed
-            videoTrack.applyConstraints({ video: { width: 320 } });
-
-            // Chunk and Send
-            const total = Math.ceil(data.length / CHUNK_SIZE);
-            const fid = Date.now();
-            for (let i = 0; i < total; i++) {
-                conn.send({ type: 'CHUNK', id: fid, index: i, total: total, data: data.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE) });
-            }
-        }, 500);
+            setTimeout(async () => {
+                const canvas = document.createElement('canvas');
+                canvas.width = vTemp.videoWidth; 
+                canvas.height = vTemp.videoHeight;
+                const ctx = canvas.getContext('2d');
+                ctx.drawImage(vTemp, 0, 0);
+                const data = canvas.toDataURL('image/jpeg', 1.0);
+                captureStream.getTracks().forEach(t => t.stop());
+                startPreview();
+                const total = Math.ceil(data.length / CHUNK_SIZE);
+                const fid = Date.now();
+                for (let i = 0; i < total; i++) {
+                    conn.send({ type: 'CHUNK', id: fid, index: i, total: total, data: data.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE) });
+                }
+            }, 1000);
+        } catch (e) { startPreview(); }
     }
 
     function handleChunk(p) {
-        document.getElementById('shutter-loading').style.display = 'block';
         if (!chunkBuffer[p.id]) chunkBuffer[p.id] = [];
         chunkBuffer[p.id][p.index] = p.data;
-        
         const count = Object.keys(chunkBuffer[p.id]).length;
         document.getElementById('status').innerText = `Transfer: ${Math.round((count/p.total)*100)}%`;
-
         if (count === p.total) {
-            if (window.navigator.vibrate) window.navigator.vibrate([100, 50, 100]);
             const a = document.createElement('a');
             a.href = chunkBuffer[p.id].join('');
-            a.download = `PRO_SNAP_${Date.now()}.jpg`;
+            a.download = `IMG_${Date.now()}.jpg`;
             a.click();
             delete chunkBuffer[p.id];
-            document.getElementById('status').innerText = "Saved High-Res!";
+            document.getElementById('status').innerText = "Saved!";
             document.getElementById('shutter-loading').style.display = 'none';
         }
     }
