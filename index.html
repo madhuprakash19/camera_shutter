@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Offline-Ready Remote Cam</title>
+    <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <style>
+        :root { --bg: #0f172a; --card: #1e293b; --accent: #38bdf8; }
+        body { font-family: system-ui, sans-serif; background: var(--bg); color: white; text-align: center; margin: 0; padding: 20px; }
+        .container { max-width: 500px; margin: auto; background: var(--card); padding: 20px; border-radius: 20px; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.5); }
+        video { width: 100%; border-radius: 12px; margin-top: 15px; transform: scaleX(-1); }
+        #qrcode { background: white; padding: 15px; display: inline-block; border-radius: 10px; margin: 20px 0; }
+        #qrcode img { margin: auto; }
+        .btn { display: block; width: 100%; padding: 15px; margin: 10px 0; border: none; border-radius: 10px; font-weight: bold; font-size: 16px; cursor: pointer; transition: 0.2s; }
+        .btn-primary { background: var(--accent); color: var(--bg); }
+        .shutter { width: 80px; height: 80px; background: white; border: 5px solid var(--accent); border-radius: 50%; margin: 20px auto; cursor: pointer; }
+        .shutter:active { transform: scale(0.9); }
+        .status-dot { height: 10px; width: 10px; border-radius: 50%; display: inline-block; background: #ef4444; margin-right: 5px; }
+        .online { background: #22c55e; }
+        .hidden { display: none; }
+    </style>
+</head>
+<body>
+
+<div class="container">
+    <h2>Remote Cam <small style="font-size: 0.5em; opacity: 0.6;">P2P</small></h2>
+    <p id="status-text"><span id="dot" class="status-dot"></span> Disconnected</p>
+
+    <div id="setup-ui">
+        <button class="btn btn-primary" onclick="initMode('camera')">📸 Be the CAMERA</button>
+        <button class="btn btn-primary" onclick="initMode('remote')">📱 Be the REMOTE</button>
+    </div>
+
+    <div id="camera-ui" class="hidden">
+        <div id="qrcode"></div>
+        <p>Scan to Link Devices</p>
+        <video id="preview" autoplay playsinline></video>
+    </div>
+
+    <div id="remote-ui" class="hidden">
+        <div id="controls" class="hidden">
+            <div class="shutter" onclick="triggerCapture()"></div>
+            <p>Tap to take photo</p>
+        </div>
+        <div id="waiting-msg">
+            <p>Scanning... (Or open the link from the QR code)</p>
+        </div>
+    </div>
+</div>
+
+<script>
+    let peer, conn, stream;
+    const dot = document.getElementById('dot');
+    const statusText = document.getElementById('status-text');
+
+    function initMode(mode) {
+        document.getElementById('setup-ui').classList.add('hidden');
+        
+        // 1. Initialize PeerJS (Uses a small bit of data for handshake)
+        peer = new Peer();
+
+        peer.on('open', (id) => {
+            if (mode === 'camera') {
+                setupCamera(id);
+            } else {
+                setupRemote();
+            }
+        });
+
+        peer.on('error', err => {
+            alert("Connection Error: " + err.type);
+            location.reload();
+        });
+    }
+
+    // --- CAMERA ROLE ---
+    async function setupCamera(id) {
+        document.getElementById('camera-ui').classList.remove('hidden');
+        
+        // Generate QR code with the current URL + ID
+        const joinLink = `${window.location.origin}${window.location.pathname}?join=${id}`;
+        new QRCode(document.getElementById("qrcode"), { text: joinLink, width: 180, height: 180 });
+
+        // Start local video
+        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false });
+        document.getElementById('preview').srcObject = stream;
+
+        peer.on('connection', (c) => {
+            conn = c;
+            handleConnection();
+        });
+    }
+
+    // --- REMOTE ROLE ---
+    function setupRemote() {
+        document.getElementById('remote-ui').classList.remove('hidden');
+        const params = new URLSearchParams(window.location.search);
+        const targetId = params.get('join');
+
+        if (targetId) {
+            conn = peer.connect(targetId);
+            conn.on('open', handleConnection);
+        } else {
+            statusText.innerText = "Error: Use the camera phone to scan the link.";
+        }
+    }
+
+    function handleConnection() {
+        dot.classList.add('online');
+        statusText.innerHTML = `<span class="status-dot online"></span> Linked Successfully`;
+        
+        if (document.getElementById('controls')) {
+            document.getElementById('controls').classList.remove('hidden');
+            document.getElementById('waiting-msg').classList.add('hidden');
+        }
+
+        conn.on('data', (data) => {
+            if (data === 'SHUTTER_CLICK') {
+                captureAndSend();
+            } else if (data.type === 'IMAGE_TRANSFER') {
+                downloadImage(data.blob);
+            }
+        });
+    }
+
+    // --- LOGIC ---
+    function triggerCapture() {
+        conn.send('SHUTTER_CLICK');
+    }
+
+    function captureAndSend() {
+        const video = document.getElementById('preview');
+        const canvas = document.createElement('canvas');
+        canvas.width = video.videoWidth;
+        canvas.height = video.videoHeight;
+        const ctx = canvas.getContext('2d');
+        // Mirror correction for camera
+        ctx.translate(canvas.width, 0);
+        ctx.scale(-1, 1);
+        ctx.drawImage(video, 0, 0);
+        
+        const imageData = canvas.toDataURL('image/jpeg', 0.9);
+        conn.send({ type: 'IMAGE_TRANSFER', blob: imageData });
+    }
+
+    function downloadImage(dataUrl) {
+        const link = document.createElement('a');
+        link.href = dataUrl;
+        link.download = `snap_${Date.now()}.jpg`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    }
+</script>
+</body>
+</html>
