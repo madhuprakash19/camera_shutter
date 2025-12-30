@@ -3,155 +3,126 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Offline-Ready Remote Cam 3MADHU</title>
+    <title>Live P2P Cam</title>
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <script src="https://unpkg.com/html5-qrcode"></script>
     <style>
-        :root { --bg: #0f172a; --card: #1e293b; --accent: #38bdf8; }
-        body { font-family: system-ui, sans-serif; background: var(--bg); color: white; text-align: center; margin: 0; padding: 20px; }
-        .container { max-width: 500px; margin: auto; background: var(--card); padding: 20px; border-radius: 20px; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.5); }
-        video { width: 100%; border-radius: 12px; margin-top: 15px; transform: scaleX(-1); }
-        #qrcode { background: white; padding: 15px; display: inline-block; border-radius: 10px; margin: 20px 0; }
-        #qrcode img { margin: auto; }
-        .btn { display: block; width: 100%; padding: 15px; margin: 10px 0; border: none; border-radius: 10px; font-weight: bold; font-size: 16px; cursor: pointer; transition: 0.2s; }
-        .btn-primary { background: var(--accent); color: var(--bg); }
-        .shutter { width: 80px; height: 80px; background: white; border: 5px solid var(--accent); border-radius: 50%; margin: 20px auto; cursor: pointer; }
-        .shutter:active { transform: scale(0.9); }
-        .status-dot { height: 10px; width: 10px; border-radius: 50%; display: inline-block; background: #ef4444; margin-right: 5px; }
-        .online { background: #22c55e; }
+        body { font-family: sans-serif; background: #111; color: white; text-align: center; margin: 0; padding: 10px; }
+        .box { max-width: 450px; margin: auto; background: #222; padding: 15px; border-radius: 15px; }
+        video { width: 100%; border-radius: 10px; background: #000; margin-top: 10px; }
+        #remote-preview { width: 160px; height: 120px; position: fixed; bottom: 20px; right: 20px; border: 2px solid #0f8; }
+        #qrcode { background: white; padding: 10px; display: inline-block; margin: 10px; border-radius: 5px; }
+        .btn { background: #00ff88; color: black; border: none; padding: 12px; width: 100%; border-radius: 8px; font-weight: bold; margin: 5px 0; }
+        .shutter { width: 70px; height: 70px; background: white; border-radius: 50%; margin: 20px auto; border: 5px solid #00ff88; cursor: pointer; }
         .hidden { display: none; }
     </style>
 </head>
 <body>
 
-<div class="container">
-    <h2>Remote Cam <small style="font-size: 0.5em; opacity: 0.6;">P2P</small></h2>
-    <p id="status-text"><span id="dot" class="status-dot"></span> Disconnected</p>
+<div class="box">
+    <h3>Live Remote Cam</h3>
+    <div id="status" style="color: #888; font-size: 12px;">Choose a role</div>
 
-    <div id="setup-ui">
-        <button class="btn btn-primary" onclick="initMode('camera')">📸 Be the CAMERA</button>
-        <button class="btn btn-primary" onclick="initMode('remote')">📱 Be the REMOTE</button>
+    <div id="setup">
+        <button class="btn" onclick="startApp('camera')">📸 ACT AS CAMERA</button>
+        <button class="btn" onclick="startApp('remote')">📱 ACT AS REMOTE</button>
     </div>
 
     <div id="camera-ui" class="hidden">
         <div id="qrcode"></div>
-        <p>Scan to Link Devices</p>
-        <video id="preview" autoplay playsinline></video>
+        <video id="local-video" autoplay playsinline muted style="transform: scaleX(-1);"></video>
     </div>
 
     <div id="remote-ui" class="hidden">
-        <div id="controls" class="hidden">
-            <div class="shutter" onclick="triggerCapture()"></div>
-            <p>Tap to take photo</p>
-        </div>
-        <div id="waiting-msg">
-            <p>Scanning... (Or open the link from the QR code)</p>
-        </div>
+        <div id="reader"></div>
+        <video id="remote-video" autoplay playsinline style="width:100%; height:200px;"></video>
+        <div class="shutter" onclick="capture()"></div>
+        <p>Live Preview Active</p>
     </div>
 </div>
 
 <script>
-    let peer, conn, stream;
-    const dot = document.getElementById('dot');
-    const statusText = document.getElementById('status-text');
+    let peer, conn, currentCall;
 
-    function initMode(mode) {
-        document.getElementById('setup-ui').classList.add('hidden');
-        
-        // 1. Initialize PeerJS (Uses a small bit of data for handshake)
-        peer = new Peer();
+    function startApp(role) {
+        document.getElementById('setup').classList.add('hidden');
+        peer = new Peer({ config: {'iceServers': [{ 'urls': 'stun:stun.l.google.com:19302' }]} });
 
         peer.on('open', (id) => {
-            if (mode === 'camera') {
-                setupCamera(id);
-            } else {
-                setupRemote();
-            }
-        });
-
-        peer.on('error', err => {
-            alert("Connection Error: " + err.type);
-            location.reload();
+            if (role === 'camera') setupCamera(id);
+            else setupRemote();
         });
     }
 
-    // --- CAMERA ROLE ---
+    // --- CAMERA PHONE ---
     async function setupCamera(id) {
         document.getElementById('camera-ui').classList.remove('hidden');
-        
-        // Generate QR code with the current URL + ID
-        const joinLink = `${window.location.origin}${window.location.pathname}?join=${id}`;
-        new QRCode(document.getElementById("qrcode"), { text: joinLink, width: 180, height: 180 });
+        const link = window.location.origin + window.location.pathname + "?join=" + id;
+        new QRCode(document.getElementById("qrcode"), { text: link, width: 150, height: 150 });
 
-        // Start local video
-        stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false });
-        document.getElementById('preview').srcObject = stream;
+        // Capture High-Res for photo, but we will stream it Low-Res
+        const stream = await navigator.mediaDevices.getUserMedia({ 
+            video: { facingMode: "environment", width: 640 } 
+        });
+        document.getElementById('local-video').srcObject = stream;
 
-        peer.on('connection', (c) => {
-            conn = c;
-            handleConnection();
+        // Answer incoming calls with our stream
+        peer.on('call', (call) => {
+            call.answer(stream);
+            handleStream(call);
+        });
+
+        peer.on('connection', (c) => { 
+            conn = c; 
+            conn.on('data', d => d === 'SNAP' && takePhoto());
+            // After connection is established, we can technically go offline
+            setTimeout(() => peer.disconnect(), 5000); 
         });
     }
 
-    // --- REMOTE ROLE ---
+    // --- REMOTE PHONE ---
     function setupRemote() {
         document.getElementById('remote-ui').classList.remove('hidden');
-        const params = new URLSearchParams(window.location.search);
-        const targetId = params.get('join');
-
-        if (targetId) {
+        const scanner = new Html5Qrcode("reader");
+        scanner.start({ facingMode: "environment" }, { fps: 10, qrbox: 200 }, (url) => {
+            scanner.stop();
+            document.getElementById('reader').classList.add('hidden');
+            const targetId = new URL(url).searchParams.get('join');
+            
+            // Start Data connection
             conn = peer.connect(targetId);
-            conn.on('open', handleConnection);
-        } else {
-            statusText.innerText = "Error: Use the camera phone to scan the link.";
-        }
-    }
-
-    function handleConnection() {
-        dot.classList.add('online');
-        statusText.innerHTML = `<span class="status-dot online"></span> Linked Successfully`;
-        
-        if (document.getElementById('controls')) {
-            document.getElementById('controls').classList.remove('hidden');
-            document.getElementById('waiting-msg').classList.add('hidden');
-        }
-
-        conn.on('data', (data) => {
-            if (data === 'SHUTTER_CLICK') {
-                captureAndSend();
-            } else if (data.type === 'IMAGE_TRANSFER') {
-                downloadImage(data.blob);
-            }
+            
+            // Start Video Call (Requesting low-res to save bandwidth)
+            navigator.mediaDevices.getUserMedia({ video: { width: 160, height: 120 }, audio: false })
+            .then(myStream => {
+                const call = peer.call(targetId, myStream);
+                handleStream(call);
+            });
         });
     }
 
-    // --- LOGIC ---
-    function triggerCapture() {
-        conn.send('SHUTTER_CLICK');
+    function handleStream(call) {
+        call.on('stream', (remoteStream) => {
+            document.getElementById('remote-video').srcObject = remoteStream;
+            document.getElementById('status').innerText = "LIVE FEED CONNECTED";
+        });
     }
 
-    function captureAndSend() {
-        const video = document.getElementById('preview');
+    function capture() { conn.send('SNAP'); }
+
+    function takePhoto() {
+        const v = document.getElementById('local-video');
         const canvas = document.createElement('canvas');
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        const ctx = canvas.getContext('2d');
-        // Mirror correction for camera
-        ctx.translate(canvas.width, 0);
-        ctx.scale(-1, 1);
-        ctx.drawImage(video, 0, 0);
-        
-        const imageData = canvas.toDataURL('image/jpeg', 0.9);
-        conn.send({ type: 'IMAGE_TRANSFER', blob: imageData });
+        canvas.width = v.videoWidth; canvas.height = v.videoHeight;
+        canvas.getContext('2d').drawImage(v, 0, 0);
+        conn.send({ img: canvas.toDataURL('image/jpeg', 0.9) });
     }
 
-    function downloadImage(dataUrl) {
-        const link = document.createElement('a');
-        link.href = dataUrl;
-        link.download = `snap_${Date.now()}.jpg`;
-        document.body.appendChild(link);
-        link.click();
-        document.body.removeChild(link);
+    peer && peer.on('data', data => { if(data.img) download(data.img); });
+    function download(url) {
+        const a = document.createElement('a'); a.href = url;
+        a.download = `snap_${Date.now()}.jpg`; a.click();
     }
 </script>
 </body>
