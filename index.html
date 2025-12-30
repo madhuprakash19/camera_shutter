@@ -3,179 +3,225 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Ultimate Remote Cam</title>
+    <title>Pro Remote Cam</title>
     <script src="https://unpkg.com/peerjs@1.5.2/dist/peerjs.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
     <script src="https://unpkg.com/html5-qrcode"></script>
     <style>
         :root { --accent: #00ff88; --bg: #000; }
         body { font-family: sans-serif; background: var(--bg); color: white; margin: 0; overflow: hidden; }
-        #app { display: flex; flex-direction: column; height: 100vh; align-items: center; justify-content: center; }
         
-        /* Video Container */
-        .video-wrap { position: relative; width: 100%; flex-grow: 1; display: flex; align-items: center; justify-content: center; background: #111; }
-        video { max-width: 100%; max-height: 100%; }
+        /* Video & Layout */
+        .viewport { height: 100vh; display: flex; flex-direction: column; position: relative; }
+        video { width: 100%; height: 100%; object-fit: contain; background: #111; }
         .mirrored { transform: scaleX(-1); }
 
-        /* Overlays */
-        #qrcode { background: white; padding: 10px; border-radius: 8px; margin-bottom: 20px; }
-        .controls { position: absolute; bottom: 30px; left: 0; right: 0; display: flex; justify-content: center; gap: 20px; align-items: center; pointer-events: none; }
-        .controls * { pointer-events: auto; }
+        /* UI Overlays */
+        #status { position: absolute; top: 10px; left: 10px; font-size: 11px; background: rgba(0,0,0,0.6); padding: 5px 10px; border-radius: 20px; z-index: 100; color: var(--accent); }
+        #timer-display { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); font-size: 80px; font-weight: bold; color: white; text-shadow: 0 0 20px rgba(0,0,0,0.8); z-index: 90; pointer-events: none; }
+        
+        /* Controls */
+        .controls { position: absolute; bottom: 30px; width: 100%; display: flex; flex-direction: column; align-items: center; gap: 15px; z-index: 80; }
+        .row { display: flex; gap: 15px; align-items: center; }
+        
+        .shutter { width: 75px; height: 75px; background: white; border-radius: 50%; border: 5px solid var(--accent); cursor: pointer; display: flex; align-items: center; justify-content: center; position: relative; }
+        .shutter:active { transform: scale(0.9); }
+        .spinner { border: 4px solid rgba(0,0,0,0.1); border-top: 4px solid var(--accent); border-radius: 50%; width: 65px; height: 65px; animation: spin 1s linear infinite; position: absolute; display: none; }
+        
+        .btn-small { background: rgba(255,255,255,0.2); border: 1px solid white; color: white; padding: 8px 12px; border-radius: 20px; font-size: 12px; }
+        .active-timer { background: var(--accent); color: black; border-color: var(--accent); }
 
-        /* Buttons */
-        .btn { background: rgba(255,255,255,0.2); border: 1px solid white; color: white; padding: 10px 15px; border-radius: 8px; cursor: pointer; }
-        .shutter { width: 70px; height: 70px; background: white; border-radius: 50%; border: 5px solid var(--accent); cursor: pointer; }
-        .fs-btn { position: absolute; top: 10px; right: 10px; z-index: 10; font-size: 20px; }
-
+        /* General */
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
         .hidden { display: none !important; }
-        #status { font-size: 12px; color: var(--accent); position: absolute; top: 10px; left: 10px; }
+        #flash { position: fixed; inset: 0; background: white; opacity: 0; pointer-events: none; z-index: 1000; transition: opacity 0.1s; }
+        #setup { position: fixed; inset: 0; background: #000; z-index: 500; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 20px; }
     </style>
 </head>
 <body>
 
-<div id="app">
-    <div id="status">Ready</div>
-    
-    <div id="setup-menu" style="padding: 20px; text-align: center;">
-        <h2>Remote Cam P2P</h2>
-        <button class="btn" onclick="init('camera')" style="background: var(--accent); color: black; margin-bottom: 10px; width: 200px;">BE THE CAMERA</button><br>
-        <button class="btn" onclick="init('remote')" style="width: 200px;">BE THE REMOTE</button>
+<div id="flash"></div>
+<div id="status">Disconnected</div>
+<div id="timer-display"></div>
+
+<div id="setup">
+    <h2 style="color:var(--accent)">Remote Cam Pro</h2>
+    <button class="btn-small" style="width:200px; padding:15px; font-weight:bold; background:var(--accent); color:black;" onclick="start('camera')">CAMERA MODE</button>
+    <button class="btn-small" style="width:200px; padding:15px; font-weight:bold;" onclick="start('remote')">REMOTE MODE</button>
+</div>
+
+<div id="app" class="viewport hidden">
+    <video id="v" autoplay playsinline muted></video>
+
+    <div id="qr-wrap" class="hidden" style="position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); background:white; padding:15px; border-radius:10px; text-align:center;">
+        <div id="qrcode"></div>
+        <p style="color:black; font-size:12px; margin-top:10px;">Scan to Link Devices</p>
     </div>
 
-    <div id="viewer" class="video-wrap hidden">
-        <button class="btn fs-btn" onclick="toggleFS()">⛶</button>
-        <video id="v" autoplay playsinline muted></video>
-        
-        <div id="qr-container" class="hidden" style="position: absolute; z-index: 5; text-align: center;">
-            <div id="qrcode"></div>
-            <p>Scan to Link</p>
+    <div id="remote-ui" class="controls hidden">
+        <div class="row">
+            <button id="t0" class="btn-small active-timer" onclick="setTimer(0)">0s</button>
+            <button id="t3" class="btn-small" onclick="setTimer(3)">3s</button>
+            <button id="t10" class="btn-small" onclick="setTimer(10)">10s</button>
         </div>
-
-        <div id="remote-tools" class="controls hidden">
-            <button class="btn" onclick="toggleMirror()">Mirror</button>
-            <div class="shutter" onclick="triggerSnap()"></div>
-            <div style="width: 60px;"></div> </div>
-    </div>
-
-    <div id="reader-wrap" class="hidden" style="width: 100%; max-width: 400px;">
-        <div id="reader"></div>
-        <p style="text-align: center;">Scan Camera Phone QR</p>
+        <div class="row">
+            <button class="btn-small" onclick="document.getElementById('v').classList.toggle('mirrored')">Flip</button>
+            <div class="shutter" onclick="triggerRequest()">
+                <div id="shutter-loading" class="spinner"></div>
+            </div>
+            <button class="btn-small" onclick="toggleFS()">Full</button>
+        </div>
     </div>
 </div>
 
-<script>
-    let peer, conn, localStream, chunkBuffer = {};
-    const CHUNK_SIZE = 16384; // 16KB chunks for stability
+<div id="reader-wrap" class="hidden" style="position:fixed; inset:0; background:black; z-index:400;">
+    <div id="reader"></div>
+</div>
 
-    function init(role) {
-        document.getElementById('setup-menu').classList.add('hidden');
-        document.getElementById('viewer').classList.remove('hidden');
-        
+<script>
+    let peer, conn, localStream, timerSec = 0, chunkBuffer = {};
+    const CHUNK_SIZE = 16384;
+
+    function start(role) {
+        document.getElementById('setup').classList.add('hidden');
+        document.getElementById('app').classList.remove('hidden');
         peer = new Peer({ config: {'iceServers': [{ 'urls': 'stun:stun.l.google.com:19302' }]} });
 
-        peer.on('open', (id) => {
+        peer.on('open', id => {
             if (role === 'camera') setupCamera(id);
             else setupRemote();
         });
     }
 
     async function setupCamera(id) {
-        document.getElementById('qr-container').classList.remove('hidden');
+        document.getElementById('qr-wrap').classList.remove('hidden');
         const link = window.location.origin + window.location.pathname + "?join=" + id;
         new QRCode(document.getElementById("qrcode"), { text: link, width: 180, height: 180 });
 
-        localStream = await navigator.mediaDevices.getUserMedia({ 
-            video: { facingMode: "environment", width: { ideal: 1920 } } 
-        });
+        // Start in LOW-RES for smooth live feed
+        localStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment", width: 320 } });
         document.getElementById('v').srcObject = localStream;
 
         peer.on('call', call => call.answer(localStream));
         peer.on('connection', c => {
             conn = c;
-            document.getElementById('qr-container').classList.add('hidden');
-            document.getElementById('status').innerText = "LINKED (CAMERA)";
-            setupDataChannel();
-            setTimeout(() => peer.disconnect(), 4000); // Go Offline mode
+            document.getElementById('qr-wrap').classList.add('hidden');
+            document.getElementById('status').innerText = "LINKED: CAMERA";
+            setupData();
+            setTimeout(() => peer.disconnect(), 5000);
         });
     }
 
     function setupRemote() {
         document.getElementById('reader-wrap').classList.remove('hidden');
         const scanner = new Html5Qrcode("reader");
-        scanner.start({ facingMode: "environment" }, { fps: 10, qrbox: 250 }, (url) => {
+        scanner.start({ facingMode: "environment" }, { fps: 10, qrbox: 250 }, url => {
             scanner.stop();
             document.getElementById('reader-wrap').classList.add('hidden');
-            const targetId = new URL(url).searchParams.get('join');
-            
-            conn = peer.connect(targetId, { reliable: true });
+            const tid = new URL(url).searchParams.get('join');
+            conn = peer.connect(tid, { reliable: true });
             navigator.mediaDevices.getUserMedia({ video: { width: 160 } }).then(s => {
-                const call = peer.call(targetId, s);
+                const call = peer.call(tid, s);
                 call.on('stream', rs => document.getElementById('v').srcObject = rs);
             });
-            setupDataChannel();
+            setupData();
         });
     }
 
-    function setupDataChannel() {
+    function setupData() {
         conn.on('open', () => {
-            document.getElementById('remote-tools').classList.remove('hidden');
-            document.getElementById('status').innerText = "LINKED (LIVE)";
+            document.getElementById('remote-ui').classList.remove('hidden');
+            document.getElementById('status').innerText = "LINKED: LIVE";
         });
-
         conn.on('data', data => {
-            if (data === 'SNAP_CMD') takeHighResSnap();
-            if (data.type === 'CHUNK') handleIncomingChunk(data);
+            if (data.type === 'START_TIMER') runCountdown(data.val);
+            if (data.type === 'CHUNK') handleChunk(data);
         });
     }
 
-    // --- PHOTO CHUNKING LOGIC ---
-    function takeHighResSnap() {
-        const v = document.getElementById('v');
-        const canvas = document.createElement('canvas');
-        canvas.width = v.videoWidth; canvas.height = v.videoHeight;
-        const ctx = canvas.getContext('2d');
-        if(v.classList.contains('mirrored')) { ctx.translate(canvas.width,0); ctx.scale(-1,1); }
-        ctx.drawImage(v, 0, 0);
+    function setTimer(s) {
+        timerSec = s;
+        ['t0','t3','t10'].forEach(id => document.getElementById(id).classList.remove('active-timer'));
+        document.getElementById('t'+s).classList.add('active-timer');
+    }
+
+    function triggerRequest() {
+        if (!conn || !conn.open) return;
+        conn.send({ type: 'START_TIMER', val: timerSec });
+        if (timerSec > 0) document.getElementById('shutter-loading').style.display = 'block';
+    }
+
+    function runCountdown(sec) {
+        let count = sec;
+        const disp = document.getElementById('timer-display');
         
-        const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
-        sendInChunks(dataUrl);
+        const interval = setInterval(() => {
+            if (count > 0) {
+                disp.innerText = count;
+                count--;
+            } else {
+                clearInterval(interval);
+                disp.innerText = "";
+                captureHighRes();
+            }
+        }, 1000);
     }
 
-    function sendInChunks(data) {
-        const total = Math.ceil(data.length / CHUNK_SIZE);
-        const fileId = Date.now();
-        for (let i = 0; i < total; i++) {
-            const chunk = data.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE);
-            conn.send({ type: 'CHUNK', id: fileId, index: i, total: total, data: chunk });
+    async function captureHighRes() {
+        // Flash Effect
+        const flash = document.getElementById('flash');
+        flash.style.opacity = '1';
+        setTimeout(() => flash.style.opacity = '0', 150);
+
+        const videoTrack = localStream.getVideoTracks()[0];
+        // Flip to Ultra-Res momentarily
+        await videoTrack.applyConstraints({ video: { width: { ideal: 4096 } } });
+
+        setTimeout(async () => {
+            const v = document.getElementById('v');
+            const canvas = document.createElement('canvas');
+            canvas.width = v.videoWidth; canvas.height = v.videoHeight;
+            const ctx = canvas.getContext('2d');
+            if (v.classList.contains('mirrored')) { ctx.translate(canvas.width,0); ctx.scale(-1,1); }
+            ctx.drawImage(v, 0, 0);
+            
+            const data = canvas.toDataURL('image/jpeg', 1.0);
+            
+            // Revert to Low-Res for live feed
+            videoTrack.applyConstraints({ video: { width: 320 } });
+
+            // Chunk and Send
+            const total = Math.ceil(data.length / CHUNK_SIZE);
+            const fid = Date.now();
+            for (let i = 0; i < total; i++) {
+                conn.send({ type: 'CHUNK', id: fid, index: i, total: total, data: data.slice(i * CHUNK_SIZE, (i + 1) * CHUNK_SIZE) });
+            }
+        }, 500);
+    }
+
+    function handleChunk(p) {
+        document.getElementById('shutter-loading').style.display = 'block';
+        if (!chunkBuffer[p.id]) chunkBuffer[p.id] = [];
+        chunkBuffer[p.id][p.index] = p.data;
+        
+        const count = Object.keys(chunkBuffer[p.id]).length;
+        document.getElementById('status').innerText = `Transfer: ${Math.round((count/p.total)*100)}%`;
+
+        if (count === p.total) {
+            if (window.navigator.vibrate) window.navigator.vibrate([100, 50, 100]);
+            const a = document.createElement('a');
+            a.href = chunkBuffer[p.id].join('');
+            a.download = `PRO_SNAP_${Date.now()}.jpg`;
+            a.click();
+            delete chunkBuffer[p.id];
+            document.getElementById('status').innerText = "Saved High-Res!";
+            document.getElementById('shutter-loading').style.display = 'none';
         }
     }
 
-    function handleIncomingChunk(payload) {
-        if (!chunkBuffer[payload.id]) chunkBuffer[payload.id] = [];
-        chunkBuffer[payload.id][payload.index] = payload.data;
-
-        const current = Object.keys(chunkBuffer[payload.id]).length;
-        document.getElementById('status').innerText = `Receiving: ${Math.round((current/payload.total)*100)}%`;
-
-        if (current === payload.total) {
-            const fullData = chunkBuffer[payload.id].join('');
-            download(fullData);
-            delete chunkBuffer[payload.id];
-            document.getElementById('status').innerText = "Photo Saved!";
-        }
-    }
-
-    // --- UI HELPERS ---
-    function triggerSnap() { conn.send('SNAP_CMD'); }
-    function toggleMirror() { document.getElementById('v').classList.toggle('mirrored'); }
     function toggleFS() {
-        const elem = document.getElementById('viewer');
-        if (!document.fullscreenElement) elem.requestFullscreen().catch(err => alert(err.message));
+        if (!document.fullscreenElement) document.documentElement.requestFullscreen();
         else document.exitFullscreen();
-    }
-    function download(url) {
-        const a = document.createElement('a'); a.href = url;
-        a.download = `photo_${Date.now()}.jpg`; a.click();
     }
 </script>
 </body>
